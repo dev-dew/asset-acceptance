@@ -1,4 +1,4 @@
-# Asset Acceptance ONLY — ERD (เฉพาะ feature นี้)
+# Asset Acceptance 
 
 > ตัดออก: contracts, substations, agreements, SAP sync, status history  
 > Prefix ตาราง: `aa_` = asset acceptance
