@@ -1,0 +1,405 @@
+// Asset Acceptance ONLY — focused schema (no contract/substation layer)
+// Import: https://dbdiagram.io
+
+Enum work_job_status {
+  draft
+  mapping
+  calculated
+  allocated
+  posted
+  cancelled
+}
+
+Enum allocation_mode {
+  for_allocation
+  separate_asset
+}
+
+Enum boq_work_type {
+  electrical
+  civil
+  equipment
+}
+
+Enum boq_category {
+  ads
+  na
+}
+
+Enum aa_document_type {
+  as01
+  as02
+  aiab
+}
+
+// ─── Entry: WBS ──────────────────────────────────────────────────────────────
+
+Table aa_wbs {
+  id bigint [pk, increment]
+  wbs varchar(50) [unique, not null, note: 'SAP WBS — GET /asset-acceptance/{wbsNo}']
+  work_name varchar(255)
+  active bool [default: true]
+  created_at timestamp [default: `now()`]
+  updated_at timestamp
+
+  Note: 'จุดเข้า Asset Acceptance — ค้นหาจากหน้า search'
+}
+
+// ─── AUC (แท็บสรุปมูลค่า) ───────────────────────────────────────────────────
+
+Table aa_auc_types {
+  id bigint [pk, increment]
+  code varchar(20) [unique, not null, note: 'Z9100']
+  name varchar(255) [not null]
+}
+
+Table aa_auc_records {
+  id bigint [pk, increment]
+  wbs_id bigint [not null, ref: > aa_wbs.id]
+  auc_type_id bigint [not null, ref: > aa_auc_types.id]
+  auc_no varchar(50) [not null]
+  auc_value decimal(18,2) [not null, default: 0]
+  allocation_mode allocation_mode [not null, default: 'for_allocation']
+  active bool [default: true]
+  created_at timestamp [default: `now()`]
+  updated_at timestamp
+
+  indexes {
+    (wbs_id, auc_no) [unique]
+  }
+
+  Note: 'มูลค่า AUC ต่อ WBS'
+}
+
+// ─── Session root ────────────────────────────────────────────────────────────
+
+Table aa_work_jobs {
+  id bigint [pk, increment]
+  wbs_id bigint [not null, ref: > aa_wbs.id]
+  job_no varchar(50) [unique]
+  status work_job_status [not null, default: 'draft']
+  boq_total decimal(18,2) [default: 0]
+  auc_selected_total decimal(18,2) [default: 0]
+  boq_diff decimal(18,2) [default: 0]
+  created_at timestamp [default: `now()`]
+  updated_at timestamp
+
+  indexes {
+    wbs_id
+  }
+
+  Note: 'Session รับทรัพย์สิน — root ของทุกแท็บ'
+}
+
+Table aa_auc_selections {
+  id bigint [pk, increment]
+  work_job_id bigint [not null, ref: > aa_work_jobs.id]
+  auc_record_id bigint [not null, ref: > aa_auc_records.id]
+  is_selected bool [not null, default: false]
+  auto_selected bool [default: false]
+  added_from_search bool [default: false]
+  created_at timestamp [default: `now()`]
+
+  indexes {
+    (work_job_id, auc_record_id) [unique]
+  }
+
+  Note: 'AUC ที่ user เลือกในแท็บสรุปมูลค่า'
+}
+
+// ─── Masters (dropdown) ──────────────────────────────────────────────────────
+
+Table aa_asset_groups {
+  id bigint [pk, increment]
+  code varchar(50) [unique, not null, note: 'Z4500, Z5100 — BOQ mapping']
+  name varchar(255) [not null]
+}
+
+Table aa_asset_product_types {
+  id bigint [pk, increment]
+  code varchar(10) [unique, not null, note: 'SL, NS, NN']
+  name varchar(100)
+}
+
+Table aa_boq_groups {
+  id bigint [pk, increment]
+  code varchar(50) [unique, not null, note: 'ads, na']
+  name varchar(255) [not null]
+  work_type boq_work_type
+}
+
+Table aa_asset_classes {
+  id bigint [pk, increment]
+  code varchar(20) [unique, not null, note: 'Z2110, Z4500']
+  name varchar(255) [not null]
+}
+
+Table aa_account_codes {
+  id bigint [pk, increment]
+  code varchar(20) [unique, not null]
+  name varchar(255) [not null]
+  asset_class_id bigint [ref: > aa_asset_classes.id]
+}
+
+Table aa_asset_types {
+  id bigint [pk, increment]
+  code varchar(20) [unique, not null, note: 'Z5100, Z5500']
+  name varchar(255) [not null]
+}
+
+Table aa_asset_sub_types {
+  id bigint [pk, increment]
+  code varchar(20) [unique, not null]
+  name varchar(255) [not null]
+  asset_type_id bigint [not null, ref: > aa_asset_types.id]
+}
+
+// ─── BOQ (แท็บรายการ BOQ + คำนวณมูลค่า) ─────────────────────────────────────
+
+Table aa_boq_lines {
+  id bigint [pk, increment]
+  work_job_id bigint [not null, ref: > aa_work_jobs.id]
+  seq int [not null]
+  code varchar(50)
+  item_name varchar(500) [not null]
+  work_type boq_work_type [not null]
+  boq_category boq_category [not null, default: 'ads']
+  boq_group_id bigint [ref: > aa_boq_groups.id]
+  product_type_id bigint [ref: > aa_asset_product_types.id]
+  unit varchar(50)
+  qty decimal(18,4) [default: 0]
+  material_cost decimal(18,2) [default: 0]
+  labor_cost decimal(18,2) [default: 0]
+  total_cost decimal(18,2) [not null, default: 0]
+  created_at timestamp [default: `now()`]
+
+  indexes {
+    (work_job_id, work_type, boq_category, seq)
+  }
+
+  Note: 'รายการ BOQ ต้นทาง'
+}
+
+Table aa_boq_mappings {
+  id bigint [pk, increment]
+  work_job_id bigint [not null, ref: > aa_work_jobs.id]
+  boq_line_id bigint [not null, ref: > aa_boq_lines.id]
+  asset_group_id bigint [ref: > aa_asset_groups.id]
+  saved_at timestamp
+  updated_at timestamp
+
+  indexes {
+    (work_job_id, boq_line_id) [unique]
+  }
+
+  Note: 'Mapping กลุ่มทรัพย์สิน (user save)'
+}
+
+Table aa_boq_calc_groups {
+  id bigint [pk, increment]
+  work_job_id bigint [not null, ref: > aa_work_jobs.id]
+  group_key varchar(50) [not null]
+  title varchar(255) [not null]
+  work_type boq_work_type [not null]
+  sort_order int [default: 0]
+
+  indexes {
+    (work_job_id, group_key) [unique]
+  }
+
+  Note: 'กลุ่มงาน — แท็บคำนวณมูลค่า'
+}
+
+Table aa_boq_calc_items {
+  id bigint [pk, increment]
+  group_id bigint [not null, ref: > aa_boq_calc_groups.id]
+  label varchar(500) [not null]
+  note varchar(500)
+  electrical_amount decimal(18,2)
+  civil_amount decimal(18,2)
+  total_amount decimal(18,2)
+  sort_order int [default: 0]
+}
+
+// ─── Equipment (แท็บคำนวณครุภัณฑ์) ───────────────────────────────────────────
+
+Table aa_equipment_sections {
+  id bigint [pk, increment]
+  work_job_id bigint [not null, ref: > aa_work_jobs.id]
+  section_key varchar(50) [not null]
+  title varchar(255) [not null]
+  section_total decimal(18,2) [default: 0]
+  subsection_total decimal(18,2)
+  grand_total decimal(18,2)
+  sort_order int [default: 0]
+
+  indexes {
+    (work_job_id, section_key) [unique]
+  }
+}
+
+Table aa_equipment_categories {
+  id bigint [pk, increment]
+  section_id bigint [not null, ref: > aa_equipment_sections.id]
+  category_name varchar(255) [not null]
+  sort_order int [default: 0]
+
+  indexes {
+    (section_id, category_name) [unique]
+  }
+}
+
+Table aa_equipment_items {
+  id bigint [pk, increment]
+  section_id bigint [not null, ref: > aa_equipment_sections.id]
+  category_id bigint [ref: > aa_equipment_categories.id]
+  boq_line_id bigint [ref: > aa_boq_lines.id]
+  seq int [not null]
+  item_name varchar(500) [not null]
+  qty decimal(18,4) [default: 0]
+  unit varchar(50)
+  unit_price decimal(18,2) [default: 0]
+  total_amount decimal(18,2) [default: 0]
+  asset_type_id bigint [ref: > aa_asset_types.id]
+  asset_sub_type_id bigint [ref: > aa_asset_sub_types.id]
+  sub_type_name varchar(255)
+  updated_at timestamp
+}
+
+// ─── Bid price (SUMMARY OF BID PRICE) ────────────────────────────────────────
+
+Table aa_bid_price_notes {
+  id bigint [pk, increment]
+  work_job_id bigint [not null, ref: > aa_work_jobs.id]
+  note_key varchar(50) [not null, note: 'electrical, civil, equipment, grandTotal']
+  note_text text
+  saved_at timestamp
+
+  indexes {
+    (work_job_id, note_key) [unique]
+  }
+}
+
+// ─── Allocation (แท็บปันส่วน) ────────────────────────────────────────────────
+
+Table aa_allocation_summaries {
+  id bigint [pk, increment]
+  work_job_id bigint [not null, ref: > aa_work_jobs.id]
+  label varchar(255) [not null]
+  amount decimal(18,2) [default: 0]
+  work_type boq_work_type
+  is_warning bool [default: false]
+  sort_order int [default: 0]
+}
+
+Table aa_allocation_lines {
+  id bigint [pk, increment]
+  work_job_id bigint [not null, ref: > aa_work_jobs.id]
+  seq int [not null]
+  item_name varchar(255) [not null]
+  asset_class_id bigint [ref: > aa_asset_classes.id]
+  account_code_id bigint [ref: > aa_account_codes.id]
+  boq_amount decimal(18,2) [default: 0]
+  allocated_amount decimal(18,2)
+  allocated_percent decimal(10,4)
+  total_amount decimal(18,2) [default: 0]
+  is_non_allocated bool [default: false]
+}
+
+Table aa_allocation_sub_lines {
+  id bigint [pk, increment]
+  allocation_line_id bigint [not null, ref: > aa_allocation_lines.id]
+  seq varchar(20) [not null]
+  item_name varchar(255) [not null]
+  asset_class_id bigint [ref: > aa_asset_classes.id]
+  total_amount decimal(18,2) [default: 0]
+  sort_order int [default: 0]
+}
+
+// ─── AA (แท็บบันทึกรับทรัพย์สิน) ─────────────────────────────────────────────
+
+Table aa_documents {
+  id bigint [pk, increment]
+  work_job_id bigint [not null, ref: > aa_work_jobs.id]
+  document_type aa_document_type [not null]
+  document_no varchar(50)
+  pdf_url varchar(500)
+  status varchar(30) [default: 'draft']
+  posted_at timestamp
+
+  indexes {
+    (work_job_id, document_type)
+  }
+}
+
+Table aa_posting_lines {
+  id bigint [pk, increment]
+  document_id bigint [not null, ref: > aa_documents.id]
+  allocation_line_id bigint [ref: > aa_allocation_lines.id]
+  equipment_item_id bigint [ref: > aa_equipment_items.id]
+  product_number varchar(50)
+  description varchar(500)
+  asset_class varchar(20)
+  asset_group varchar(50)
+  asset_code varchar(50)
+  quantity decimal(18,4)
+  unit varchar(50)
+  asset_value decimal(18,2)
+  wbs_element varchar(50)
+  posting_date date
+  sort_order int [default: 0]
+}
+
+Table aa_report_preview_rows {
+  id bigint [pk, increment]
+  document_id bigint [not null, ref: > aa_documents.id]
+  page_no int
+  row_data jsonb
+  sort_order int [default: 0]
+}
+
+// ─── Table groups ────────────────────────────────────────────────────────────
+
+TableGroup aa_entry {
+  aa_wbs
+  aa_work_jobs
+}
+
+TableGroup aa_auc {
+  aa_auc_types
+  aa_auc_records
+  aa_auc_selections
+}
+
+TableGroup aa_boq {
+  aa_boq_groups
+  aa_asset_product_types
+  aa_asset_groups
+  aa_boq_lines
+  aa_boq_mappings
+  aa_boq_calc_groups
+  aa_boq_calc_items
+}
+
+TableGroup aa_equipment {
+  aa_asset_types
+  aa_asset_sub_types
+  aa_equipment_sections
+  aa_equipment_categories
+  aa_equipment_items
+}
+
+TableGroup aa_allocation {
+  aa_asset_classes
+  aa_account_codes
+  aa_allocation_summaries
+  aa_allocation_lines
+  aa_allocation_sub_lines
+  aa_bid_price_notes
+}
+
+TableGroup aa_posting {
+  aa_documents
+  aa_posting_lines
+  aa_report_preview_rows
+}
