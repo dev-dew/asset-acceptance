@@ -7,9 +7,9 @@
 
 | ไฟล์ | ใช้งาน |
 |------|--------|
-| `asset-acceptance-only.dbml` | Import dbdiagram.io |
-| `asset-acceptance-only.schema.sql` | PostgreSQL DDL |
-| `asset-acceptance-only.queries.sql` | ตัวอย่าง query |
+| `asset-acceptance.dbml` | Import dbdiagram.io |
+| `asset-acceptance.schema.sql` | PostgreSQL DDL |
+| `asset-acceptance.queries.sql` | ตัวอย่าง query |
 
 ---
 
